@@ -58,6 +58,40 @@ def copy_bucket(source_bucket_name: str, target_bucket_name: str, prefix: str = 
     print()
     print(f"Done. Copied: {copied}, failed: {failed}")
 
+def copy_one_file(source_bucket_name: str, target_bucket_name: str, blob_name: str):
+    src_client = storage.Client.from_service_account_json(SRC_SA_KEY_FILE)
+    tgt_client = storage.Client.from_service_account_json(TGT_SA_KEY_FILE)
+
+    src_bucket = src_client.bucket(source_bucket_name)
+    tgt_bucket = tgt_client.bucket(target_bucket_name)
+
+    src_blob = src_bucket.blob(blob_name)
+
+    if not src_blob.exists():
+        raise FileNotFoundError(f"Nie znaleziono pliku: gs://{source_bucket_name}/{blob_name}")
+
+    tmp_path = None
+
+    try:
+        fd, tmp_path = tempfile.mkstemp()
+        os.close(fd)
+
+        print(f"Downloading: gs://{source_bucket_name}/{blob_name}")
+        src_blob.download_to_filename(tmp_path)
+
+        print(f"Local tmp: {tmp_path}")
+        print(f"Size local: {os.path.getsize(tmp_path)} bytes")
+
+        print(f"Uploading:   gs://{target_bucket_name}/{blob_name}")
+        tgt_blob = tgt_bucket.blob(blob_name)
+        tgt_blob.upload_from_filename(tmp_path)
+
+        print("OK")
+
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+            print(f"Deleted local tmp: {tmp_path}")
 
 def main():
     parser = argparse.ArgumentParser()
