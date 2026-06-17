@@ -1,66 +1,18 @@
-import os
-import re
-import zipfile
-from dataclasses import dataclass
-from xml.etree import ElementTree
-
-from app.core.errors import DoclingError
-
-try:
-    from docling.datamodel.base_models import InputFormat
-    from docling.datamodel.pipeline_options import EasyOcrOptions, PdfPipelineOptions, RapidOcrOptions, TesseractCliOcrOptions
-    from docling.document_converter import DocumentConverter, PdfFormatOption
-    from docling_core.types.doc import DocItemLabel
-except Exception:  # noqa: BLE001
-    DocumentConverter = None
-    DocItemLabel = None
-    EasyOcrOptions = None
-    InputFormat = None
-    PdfFormatOption = None
-    PdfPipelineOptions = None
-    RapidOcrOptions = None
-    TesseractCliOcrOptions = None
-
-
-@dataclass
-class DoclingConversionResult:
-    markdown: str
-    raw_result: object | None = None
-
-
-class DoclingService:
-    def __init__(
-        self,
-        artifacts_path: str,
-        device: str = "cpu",
-        ocr_enabled: bool = False,
-        ocr_engine: str = "rapidocr",
-        ocr_langs: str = "pol,eng",
-        rapidocr_backend: str = "onnxruntime",
-        relocate_footnotes: bool = False,
-    ):
-        self.artifacts_path = artifacts_path
-        self.device = device
-        self.ocr_enabled = ocr_enabled
-        self.ocr_engine = ocr_engine
-        self.ocr_langs = ocr_langs
-        self.rapidocr_backend = rapidocr_backend
-        self.relocate_footnotes = relocate_footnotes
-        self.converter = None
-        if DocumentConverter is not None:
-            self.converter = self._create_document_converter()
-
-    def convert_input_to_markdown(self, input_path: str) -> DoclingConversionResult:
-        if DocumentConverter is None or self.converter is None:
-            raise DoclingError("Docling is not available in runtime environment")
-
-        try:
-            # Docling may use model artifacts path from environment in some setups.
-            os.environ.setdefault("DOCLING_ARTIFACTS_PATH", self.artifacts_path)
-            result = self.converter.convert(input_path)
-
-            if hasattr(result, "document") and hasattr(result.document, "export_to_markdown"):
-                markdown = self._export_markdown_with_native_page_placeholders(result)
+def _mark_footnote_reference_marker(markdown: str, footnote_id: str, search_start: int = 0, search_end: int | None = None) -> str:
+        search_end = len(markdown) if search_end is None else search_end
+        search_area = markdown[search_start:search_end]
+        marker = f"[{footnote_id}]"
+        marker_pattern = re.compile(
+            rf"(?<=[a-ząćęłńóśźż])\s+{re.escape(footnote_id)}(?=(?:\s*[,;:])?\s+[a-ząćęłńóśźż])",
+            re.IGNORECASE,
+        )
+        for match in marker_pattern.finditer(search_area):
+            prefix = search_area[max(0, match.start() - 20) : match.start()]
+            if re.search(r"(?:Figure|Fig\.|Table|Section)\s*$", prefix, re.IGNORECASE):
+                continue
+            marker_start = search_start + match.start()
+            return f"{markdown[:marker_start]} {marker}{markdown[search_start + match.end():]}"
+        return markdown
                 footnotes = self._extract_docling_footnotes(result)
                 if input_path.lower().endswith(".docx"):
                     markdown, docx_footnotes = self._add_docx_footnote_references(input_path, markdown)
